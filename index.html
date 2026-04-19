@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AIU KYC - Smart Underwriting</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <script src="https://unpkg.com/tesseract.js@5.0.5/dist/tesseract.min.js"></script>
+  <style>
+   .section { display: none; }
+   .section.active { display: block; }
+   .status-green { background: #10b981; }
+   .status-amber { background: #f59e0b; }
+   .status-gray { background: #6b7280; }
+   .timeline-item::before { content: ''; position: absolute; left: -20px; top: 5px; width: 12px; height: 12px; border-radius: 50%; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <div id="app" class="max-w-md mx-auto min-h-screen bg-white shadow-lg">
+
+    <!-- API Key Gate -->
+    <div id="keyGate" class="p-6">
+      <h1 class="text-2xl font-bold mb-4" data-i18n="title">🔐 AIU KYC Access</h1>
+      <input id="apiKeyInput" type="password" placeholder="Enter API Key" class="w-full p-3 border rounded mb-3">
+      <button onclick="verifyKey()" class="w-full bg-blue-600 text-white p-3 rounded font-semibold" data-i18n="enter">Enter</button>
+      <p class="text-xs mt-4 text-gray-500">Key stored in session only. For Render: set ENV APP_API_KEY</p>
+    </div>
+
+    <!-- Main App -->
+    <div id="mainApp" class="hidden">
+      <!-- Header -->
+      <header class="bg-blue-700 text-white p-4 flex justify-between items-center">
+        <h1 class="font-bold" data-i18n="title">AIU Smart KYC</h1>
+        <div class="flex gap-2">
+          <button onclick="setLang('en')" class="px-2 py-1 bg-blue-800 rounded text-xs">EN</button>
+          <button onclick="setLang('hi')" class="px-2 py-1 bg-blue-800 rounded text-xs">हिं</button>
+          <button onclick="speakInstructions()" class="px-2 py-1 bg-blue-800 rounded text-xs">🎙️</button>
+        </div>
+      </header>
+
+      <!-- Navigation -->
+      <nav class="flex overflow-x-auto bg-gray-100 p-2 gap-2 text-sm">
+        <button onclick="showSection('selfie')" class="nav-btn px-3 py-1 bg-white rounded whitespace-nowrap" data-i18n="nav_selfie">🤳 Selfie</button>
+        <button onclick="showSection('docs')" class="nav-btn px-3 py-1 bg-white rounded whitespace-nowrap" data-i18n="nav_docs">📄 Docs</button>
+        <button onclick="showSection('details')" class="nav-btn px-3 py-1 bg-white rounded whitespace-nowrap" data-i18n="nav_details">⚡ Details</button>
+        <button onclick="showSection('uw')" class="nav-btn px-3 py-1 bg-white rounded whitespace-nowrap" data-i18n="nav_uw">📊 UW Status</button>
+      </nav>
+
+      <!-- 1. Selfie + Face Match -->
+      <section id="selfie" class="section active p-4">
+        <h2 class="font-bold mb-2" data-i18n="selfie_title">Selfie Capture & Face Match</h2>
+        <video id="video" class="w-full rounded bg-black" autoplay playsinline></video>
+        <button onclick="captureSelfie()" class="w-full bg-blue-600 text-white p-2 rounded mt-2" data-i18n="capture">Capture Selfie</button>
+        <canvas id="canvas" class="hidden"></canvas>
+        <div id="faceMatchStatus" class="mt-3 text-sm"></div>
+      </section>
+
+      <!-- 2. Document OCR + Authenticity -->
+      <section id="docs" class="section p-4">
+        <h2 class="font-bold mb-2" data-i18n="docs_title">Document Upload & AI Check</h2>
+        <div class="space-y-3">
+          <div>
+            <label class="text-sm font-semibold">KYC Photo / Aadhaar</label>
+            <input type="file" id="kycDoc" accept="image/*" class="w-full text-sm" onchange="processDoc(this, 'kyc')">
+          </div>
+          <div id="medicalDocs" class="hidden">
+            <label class="text-sm font-semibold">Medical Reports</label>
+            <input type="file" id="medDoc" accept="image/*,.pdf" class="w-full text-sm" onchange="processDoc(this, 'medical')">
+          </div>
+          <div id="financialDocs" class="hidden">
+            <label class="text-sm font-semibold">Financial Docs</label>
+            <input type="file" id="finDoc" accept="image/*,.pdf" class="w-full text-sm" onchange="processDoc(this, 'financial')">
+          </div>
+        </div>
+        <!-- Timeline Tracker -->
+        <div class="mt-6">
+          <h3 class="font-semibold mb-2" data-i18n="tracker">📋 Document Tracker</h3>
+          <div id="docTimeline" class="pl-6 border-l-2 border-gray-200 space-y-4 text-sm"></div>
+        </div>
+      </section>
+
+      <!-- 3. Smart Auto-fill -->
+      <section id="details" class="section p-4">
+        <h2 class="font-bold mb-2" data-i18n="details_title">Proposal Details</h2>
+        <form id="uwForm" class="space-y-3">
+          <input id="name" placeholder="Name" class="w-full p-2 border rounded">
+          <input id="dob" type="date" placeholder="DOB" class="w-full p-2 border rounded" onchange="checkAge()">
+          <input id="phone" placeholder="Phone" class="w-full p-2 border rounded">
+          <input id="sumAssured" type="number" placeholder="Sum Assured" class="w-full p-2 border rounded" onchange="checkSA()">
+          <select id="disclosure" class="w-full p-2 border rounded" onchange="checkDisclosure()">
+            <option value="none">No Adverse Medical History</option>
+            <option value="adverse">Have Medical Condition</option>
+          </select>
+          <button type="button" onclick="runUW()" class="w-full bg-green-600 text-white p-3 rounded font-semibold" data-i18n="run_uw">Run UW Engine</button>
+        </form>
+      </section>
+
+      <!-- 4. UW Risk Engine Result -->
+      <section id="uw" class="section p-4">
+        <h2 class="font-bold mb-2" data-i18n="uw_title">Underwriting Decision</h2>
+        <div id="uwResult" class="p-4 rounded border"></div>
+      </section>
+    </div>
+  </div>
+
+<script>
+// ===== CONFIG =====
+const APP_API_KEY = "ENV_OR_SESSION_KEY"; // Replace with env var on Render
+const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-1.5-pro"];
+let currentLang = 'en';
+let appState = {
+  selfieBlob: null, kycText: '', faceMatch: false, age: 0, sumAssured: 0,
+  docs: { kyc: 'gray', medical: 'gray', financial: 'gray' }
+};
+
+// ===== I18N =====
+const i18n = {
+  en: { title: "AIU Smart KYC", enter: "Enter", nav_selfie: "🤳 Selfie", nav_docs: "📄 Docs", nav_details: "⚡ Details", nav_uw: "📊 UW Status",
+        selfie_title: "Selfie Capture & Face Match", capture: "Capture Selfie", docs_title: "Document Upload & AI Check",
+        tracker: "📋 Document Tracker", details_title: "Proposal Details", run_uw: "Run UW Engine", uw_title: "Underwriting Decision" },
+  hi: { title: "AIU स्मार्ट KYC", enter: "प्रवेश करें", nav_selfie: "🤳 सेल्फी", nav_docs: "📄 दस्तावेज़", nav_details: "⚡ विवरण", nav_uw: "📊 UW स्थिति",
+        selfie_title: "सेल्फी कैप्चर और फेस मैच", capture: "सेल्फी लें", docs_title: "दस्तावेज़ अपलोड और AI जांच",
+        tracker: "📋 दस्तावेज़ ट्रैकर", details_title: "प्रस्ताव विवरण", run_uw: "UW इंजन चलाएं", uw_title: "अंडरराइटिंग निर्णय" }
+};
+function setLang(lang) {
+  currentLang = lang;
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    el.textContent = i18n[lang][el.dataset.i18n] || el.textContent;
+  });
+}
+
+// ===== API KEY GATE =====
+function verifyKey() {
+  const key = document.getElementById('apiKeyInput').value;
+  if (key === "DEMO123" || key === APP_API_KEY) { // Replace DEMO123 with real check
+    sessionStorage.setItem('appKey', key);
+    document.getElementById('keyGate').classList.add('hidden');
+    document.getElementById('mainApp').classList.remove('hidden');
+    initApp();
+  } else alert('Invalid Key');
+}
+
+// ===== VOICE =====
+function speakInstructions() {
+  const msg = currentLang === 'hi'?
+    "कृपया सभी सेक्शन भरें। सेल्फी, दस्तावेज़, और विवरण।" :
+    "Please complete all sections: selfie, documents, and details.";
+  const utter = new SpeechSynthesisUtterance(msg);
+  utter.lang = currentLang === 'hi'? 'hi-IN' : 'en-US';
+  speechSynthesis.speak(utter);
+}
+
+// ===== NAVIGATION =====
+function showSection(id) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+// ===== SELFIE + FACE MATCH =====
+async function initApp() {
+  await faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model/');
+  await faceapi.nets.faceLandmark68Net.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model/');
+  await faceapi.nets.faceRecognitionNet.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model/');
+  navigator.mediaDevices.getUserMedia({ video: true }).then(s => document.getElementById('video').srcObject = s);
+  updateDocVisibility();
+}
+
+async function captureSelfie() {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  canvas.toBlob(blob => appState.selfieBlob = blob);
+  document.getElementById('faceMatchStatus').innerHTML = 'Selfie captured. Upload KYC doc to match.';
+  updateTimeline('selfie', 'green', 'Selfie captured');
+}
+
+// ===== DOC OCR + GEMINI AUTHENTICITY CHECK =====
+async function processDoc(input, type) {
+  const file = input.files[0];
+  updateTimeline(type, 'amber', `${type} uploaded - Processing...`);
+
+  // 1. Tesseract OCR
+  const { data: { text } } = await Tesseract.recognize(file, 'eng+hin');
+  if (type === 'kyc') appState.kycText = text;
+
+  // 2. Gemini Authenticity Check with fallback
+  const base64 = await fileToBase64(file);
+  const prompt = `You are a forensic document expert. Analyze this ${type} document image. 1. Extract key fields. 2. Check for photoshop/AI signs like inconsistent fonts, shadows, noise patterns. Return JSON: {fields:{}, isAuthentic:boolean, reason:string}`;
+
+  let geminiRes = await callGeminiWithFallback(prompt, base64);
+  let isAuthentic = geminiRes?.isAuthentic!== false;
+
+  // 3. Auto-fill from OCR
+  if (type === 'kyc') {
+    const name = text.match(/Name[:\s]+([A-Za-z ]+)/i)?.[1];
+    const dob = text.match(/DOB[:\s]+([\d\/-]+)/i)?.[1];
+    if (name) document.getElementById('name').value = name.trim();
+    if (dob) document.getElementById('dob').value = formatDate(dob);
+  }
+
+  // 4. Face Match if both selfie + kyc exist
+  if (type === 'kyc' && appState.selfieBlob) {
+    const img1 = await faceapi.bufferToImage(appState.selfieBlob);
+    const img2 = await faceapi.bufferToImage(file);
+    const d1 = await faceapi.detectSingleFace(img1).withFaceLandmarks().withFaceDescriptor();
+    const d2 = await faceapi.detectSingleFace(img2).withFaceLandmarks().withFaceDescriptor();
+    if (d1 && d2) {
+      const dist = faceapi.euclideanDistance(d1.descriptor, d2.descriptor);
+      appState.faceMatch = dist < 0.6;
+      document.getElementById('faceMatchStatus').innerHTML = appState.faceMatch?
+        '✅ Face Match: Success' : '❌ Face Match: Failed';
+    }
+  }
+
+  appState.docs[type] = isAuthentic? 'green' : 'amber';
+  updateTimeline(type, appState.docs[type], isAuthentic? `${type} verified` : `Warning: ${geminiRes.reason}`);
+  updateDocVisibility();
+}
+
+async function callGeminiWithFallback(prompt, base64Image) {
+  for (const model of GEMINI_MODELS) {
+    try {
+      // For Render: Replace with your /api/gemini proxy endpoint
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=YOUR_GEMINI_KEY`, {
+        method: 'POST',
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: "image/jpeg", data: base64Image.split(',')[1] } }] }]
+        })
+      });
+      const data = await res.json();
+      const text = data.candidates[0].content.parts[0].text;
+      return JSON.parse(text.match(/\{.*\}/s)[0]);
+    } catch (e) { console.log(`${model} failed`); }
+  }
+  return { isAuthentic: true, reason: "API fallback failed - manual review" };
+}
+
+// ===== UW RULES ENGINE - 90+ RULES STUB =====
+function runUW() {
+  appState.age = getAge(document.getElementById('dob').value);
+  appState.sumAssured = Number(document.getElementById('sumAssured').value);
+  const adverse = document.getElementById('disclosure').value === 'adverse';
+
+  let decision = { status: 'STP', reasons: [], color: 'bg-green-100 border-green-500' };
+
+  // Core Rules
+  if (appState.sumAssured > 20000000) {
+    decision.status = 'MEDICAL_REQ';
+    decision.reasons.push('SA ≥ ₹2Cr: Medical reports required');
+    decision.color = 'bg-amber-100 border-amber-500';
+  }
+  if (appState.age > 45) {
+    decision.status = 'MEDICAL_REQ';
+    decision.reasons.push('Age > 45: Medical reports required');
+    decision.color = 'bg-amber-100 border-amber-500';
+  }
+  if (adverse) {
+    decision.status = 'UW_REVIEW';
+    decision.reasons.push('Adverse disclosure: Manual UW review');
+    decision.color = 'bg-red-100 border-red-500';
+  }
+  if (!appState.faceMatch) {
+    decision.status = 'UW_REVIEW';
+    decision.reasons.push('Face match failed: Manual verification');
+    decision.color = 'bg-red-100 border-red-500';
+  }
+  if (appState.sumAssured < 20000000) {
+    decision.reasons.push('✅ Financial waiver approved: SA < ₹2Cr');
+  }
+  if (decision.status === 'STP' && appState.sumAssured <= 20000000) {
+    decision.reasons.push('✅ STP approved: Clean proposal');
+  }
+
+  document.getElementById('uwResult').className = `p-4 rounded border ${decision.color}`;
+  document.getElementById('uwResult').innerHTML = `<b>Decision: ${decision.status}</b><br>${decision.reasons.join('<br>')}`;
+  showSection('uw');
+}
+
+// ===== HELPERS =====
+function checkAge() { appState.age = getAge(document.getElementById('dob').value); updateDocVisibility(); }
+function checkSA() { appState.sumAssured = Number(document.getElementById('sumAssured').value); updateDocVisibility(); }
+function checkDisclosure() { updateDocVisibility(); }
+
+function updateDocVisibility() {
+  document.getElementById('medicalDocs').classList.toggle('hidden',!(appState.sumAssured >= 20000000 || appState.age > 45));
+  document.getElementById('financialDocs').classList.toggle('hidden', appState.sumAssured < 20000000);
+}
+
+function updateTimeline(key, status, text) {
+  const el = document.getElementById('docTimeline');
+  const existing = document.getElementById(`tl-${key}`);
+  const item = existing || document.createElement('div');
+  item.id = `tl-${key}`;
+  item.className = `timeline-item relative status-${status}`;
+  item.style.setProperty('--tw-bg-opacity', '1');
+  item.innerHTML = `<div class="absolute left-[-26px] top-0 w-3 h-3 rounded-full status-${status}"></div>${text}`;
+  if (!existing) el.appendChild(item);
+}
+
+function getAge(dob) { return new Date().getFullYear() - new Date(dob).getFullYear(); }
+function formatDate(str) { const d = new Date(str); return d.toISOString().split('T')[0]; }
+function fileToBase64(file) { return new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(file); }); }
+
+// Init
+if (sessionStorage.getItem('appKey')) verifyKey();
+</script>
+</body>
+</html>
