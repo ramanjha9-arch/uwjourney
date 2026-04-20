@@ -1720,241 +1720,9 @@ textarea { resize:vertical; min-height:80px; }
 </div>
 
 <script>
+
 'use strict';
 
-/* ═══════════════════════════════════════════════════
-   GEMINI MODEL REGISTRY — Free-tier first hierarchy
-   Tokens: gemini-2.0-flash-lite > gemini-2.0-flash >
-           gemini-1.5-flash > gemini-2.5-flash-preview >
-           gemini-1.5-pro > gemini-1.0-pro
-═══════════════════════════════════════════════════ */
-const ALL_GEMINI_MODELS = [
-  {
-    id: 'gemini-2.0-flash-lite',
-    name: 'Gemini 2.0 Flash Lite',
-    meta: 'Fastest · Most free tokens · Best for OCR',
-    tier: 'free',
-    checked: true
-  },
-  {
-    id: 'gemini-2.0-flash',
-    name: 'Gemini 2.0 Flash',
-    meta: 'Fast · Generous free quota · Vision capable',
-    tier: 'free',
-    checked: true
-  },
-  {
-    id: 'gemini-1.5-flash',
-    name: 'Gemini 1.5 Flash',
-    meta: 'Stable free tier · Good multimodal support',
-    tier: 'free',
-    checked: true
-  },
-  {
-    id: 'gemini-1.5-flash-8b',
-    name: 'Gemini 1.5 Flash 8B',
-    meta: 'Lightweight · High free RPM · Good fallback',
-    tier: 'free',
-    checked: true
-  },
-  {
-    id: 'gemini-2.5-flash-preview-05-20',
-    name: 'Gemini 2.5 Flash Preview',
-    meta: 'Latest preview · May have limited availability',
-    tier: 'preview',
-    checked: false
-  },
-  {
-    id: 'gemini-1.5-pro',
-    name: 'Gemini 1.5 Pro',
-    meta: 'Higher quality · Limited free requests/day',
-    tier: 'paid',
-    checked: false
-  },
-  {
-    id: 'gemini-1.0-pro',
-    name: 'Gemini 1.0 Pro',
-    meta: 'Legacy stable · Text only (no vision)',
-    tier: 'paid',
-    checked: false
-  }
-];
-
-// Runtime state
-
-function getGeminiKey() { return sessionStorage.getItem('abc_life_gemini_key') || ''; }
-function getCheckedModels() {
-  return ALL_GEMINI_MODELS
-    .filter(m => {
-      const cb = document.getElementById('mchk-' + m.id);
-      return cb ? cb.checked : m.checked;
-    })
-    .map(m => m.id);
-}
-// Used everywhere instead of hardcoded GEMINI_MODELS constant
-function GEMINI_MODELS() { return getCheckedModels(); }
-
-/* ── Build model list UI ── */
-function buildModelList() {
-  const container = document.getElementById('modelList');
-  if (!container) return;
-  container.innerHTML = ALL_GEMINI_MODELS.map(m => `
-    <label class="model-row" for="mchk-${m.id}">
-      <input type="checkbox" id="mchk-${m.id}" ${m.checked ? 'checked' : ''} onchange="resetModelStatus()">
-      <div class="model-status-dot" id="mdot-${m.id}"></div>
-      <div class="model-row-info">
-        <div class="model-row-name">${m.name}</div>
-        <div class="model-row-meta">${m.meta}</div>
-      </div>
-      <span class="model-row-badge ${m.tier === 'free' ? 'badge-free' : m.tier === 'preview' ? 'badge-preview' : 'badge-paid'}">
-        ${m.tier === 'free' ? '✓ Free' : m.tier === 'preview' ? '⚡ Preview' : '💳 Paid'}
-      </span>
-    </label>`).join('');
-}
-
-function resetModelStatus() {
-  ALL_GEMINI_MODELS.forEach(m => {
-    const dot = document.getElementById('mdot-' + m.id);
-    if (dot) dot.className = 'model-status-dot';
-  });
-  const line = document.getElementById('testResultLine');
-  if (line) line.innerHTML = '<span>💡 Click "Test Models" to verify which models work with your key</span>';
-}
-
-/* ── Test all checked models ── */
-async function testAllModels() {
-  const key = document.getElementById('geminiKeyInput').value.trim();
-  if (!key || key.length < 20) {
-    document.getElementById('testResultLine').innerHTML = '<span style="color:#FCA5A5;">⚠️ Enter your API key first</span>';
-    return;
-  }
-  const btn = document.getElementById('testModelsBtn');
-  btn.textContent = '⏳ Testing models…';
-  btn.disabled = true;
-
-  const line = document.getElementById('testResultLine');
-  line.innerHTML = '<span>🔬 Testing each model — this takes a few seconds…</span>';
-
-  const checked = getCheckedModels();
-  const results = [];
-  let firstWorking = null;
-
-  for (const modelId of ALL_GEMINI_MODELS.map(m => m.id)) {
-    const dot = document.getElementById('mdot-' + modelId);
-    if (dot) dot.className = 'model-status-dot testing';
-    // Only test checked models
-    if (!ALL_GEMINI_MODELS.find(m => m.id === modelId && (document.getElementById('mchk-' + modelId)?.checked ?? m.checked))) {
-      if (dot) dot.className = 'model-status-dot';
-      continue;
-    }
-    try {
-      const resp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${key}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents:[{parts:[{text:'Hi, reply with just OK'}]}], generationConfig:{maxOutputTokens:5} })
-        }
-      );
-      if (resp.ok) {
-        const data = await resp.json();
-        const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (reply) {
-          if (dot) dot.className = 'model-status-dot ok';
-          results.push({ id: modelId, ok: true });
-          if (!firstWorking) firstWorking = modelId;
-        } else {
-          if (dot) dot.className = 'model-status-dot fail';
-          results.push({ id: modelId, ok: false, reason: 'No reply' });
-        }
-      } else {
-        const errBody = await resp.json().catch(() => ({}));
-        const reason = errBody?.error?.message || ('HTTP ' + resp.status);
-        if (dot) dot.className = 'model-status-dot fail';
-        results.push({ id: modelId, ok: false, reason });
-      }
-    } catch(e) {
-      if (dot) dot.className = 'model-status-dot fail';
-      results.push({ id: modelId, ok: false, reason: e.message });
-    }
-    // Small delay to avoid rate-limit
-    await new Promise(r => setTimeout(r, 300));
-  }
-
-  btn.textContent = '🔬 Test Models with My Key';
-  btn.disabled = false;
-
-  const okCount = results.filter(r => r.ok).length;
-  if (okCount === 0) {
-    line.innerHTML = `<span style="color:#FCA5A5;">❌ No models worked. Check your API key or enable billing on Google AI Studio.</span>`;
-    setGeminiStatus('error');
-  } else {
-    // Auto-set active model to first working
-    activeGeminiModel = firstWorking;
-    updateActiveModelBadge();
-    line.innerHTML = `<span style="color:#6EE7B7;">✅ ${okCount} model${okCount > 1 ? 's' : ''} working! Active: <strong>${firstWorking}</strong></span>`;
-    setGeminiStatus('connected');
-  }
-}
-
-function toggleKeyVis() {
-  const inp = document.getElementById('geminiKeyInput');
-  const btn = document.getElementById('keyToggleBtn');
-  if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🙈'; }
-  else { inp.type = 'password'; btn.textContent = '👁️'; }
-}
-
-function saveApiKey() {
-  const key = document.getElementById('geminiKeyInput').value.trim();
-  if (!key || key.length < 20) { showToast('⚠️','Please enter a valid Gemini API key'); return; }
-  sessionStorage.setItem('abc_life_gemini_key', key);
-  // Save selected models
-  const selected = getCheckedModels();
-  if (selected.length === 0) { showToast('⚠️','Select at least one model'); return; }
-  sessionStorage.setItem('abc_life_models', JSON.stringify(selected));
-  geminiModeEnabled = true;
-  document.getElementById('keyGate').classList.add('hidden');
-  showToast('🔓','API key saved · Testing models…');
-  initApp();
-  setTimeout(testGeminiConnection, 400);
-}
-
-function skipGemini() {
-  geminiModeEnabled = false;
-  sessionStorage.removeItem('abc_life_gemini_key');
-  document.getElementById('keyGate').classList.add('hidden');
-  setGeminiStatus('offline');
-  document.getElementById('activeModelBadge').style.display = 'none';
-  showToast('⏩','Manual mode — AI features disabled');
-  initApp();
-}
-
-function updateActiveModelBadge() {
-  const el = document.getElementById('activeModelName');
-  const badge = document.getElementById('activeModelBadge');
-  if (el) el.textContent = activeGeminiModel || '—';
-  if (badge) badge.style.display = activeGeminiModel && geminiModeEnabled ? 'flex' : 'none';
-}
-
-/* Click active model badge → re-open model switcher */
-function showModelSwitcher() {
-  document.getElementById('keyGate').classList.remove('hidden');
-  // Pre-fill key
-  const key = getGeminiKey();
-  const inp = document.getElementById('geminiKeyInput');
-  if (inp && key) inp.value = key;
-}
-
-/* ── Resolves active model list at runtime (replaces old const GEMINI_MODELS) ── */
-function getActiveModelList() {
-  const saved = sessionStorage.getItem('abc_life_models');
-  if (saved) {
-    try { return JSON.parse(saved); } catch(e) {}
-  }
-  return ALL_GEMINI_MODELS.filter(m => m.checked).map(m => m.id);
-}
-
-/* ═══ SECTION CONFIG ═══ */
 const SECTIONS = [
   { id:'profile',     icon:'👤', label:'Customer Profile',    sub:'Identity & Contact' },
   { id:'proposer',    icon:'📋', label:'Proposer Details',    sub:'Proposer & Nominee' },
@@ -1996,17 +1764,6 @@ function showSplash() {
   }, 600);
 }
 
-function startPortal(withVoice) {
-  voiceEnabled = withVoice;
-  if (!withVoice) { if (window.speechSynthesis) window.speechSynthesis.cancel(); }
-  const overlay = document.getElementById('splashOverlay');
-  overlay.style.animation = 'wFadeOut 0.6s ease forwards';
-  setTimeout(() => { overlay.style.display = 'none'; }, 650);
-  document.getElementById('autofillBox').classList.remove('hidden');
-  showSection('profile');
-  if (withVoice) setTimeout(() => ariaSay(STEP_SCRIPTS.profile), 800);
-}
-
 /* ═══ SIDEBAR & MOBILE NAV BUILD ═══ */
 function buildSidebarNav() {
   const nav = document.getElementById('sidebarNav');
@@ -2021,62 +1778,6 @@ function buildSidebarNav() {
     div.innerHTML = `<div class="nav-section-icon">${s.icon}</div><div class="nav-section-text"><div class="nav-section-name">${s.label}</div><div class="nav-section-sub">${s.sub}</div></div><div class="nav-status ${statusClass}">${statusDot}</div>`;
     nav.appendChild(div);
   });
-}
-
-function buildMobileNav() {
-  const mNav = document.getElementById('mobileNav');
-  mNav.innerHTML = '';
-  SECTIONS.forEach(s => {
-    const div = document.createElement('div');
-    div.className = 'mnav-item' + (s.id === currentSection ? ' active' : '') + (sectionStatus[s.id] === 'complete' ? ' completed' : '');
-    div.id = 'mnav-' + s.id;
-    div.onclick = () => showSection(s.id);
-    div.innerHTML = s.icon + ' ' + s.label.split(' ')[0];
-    mNav.appendChild(div);
-  });
-  // Requirements button
-  const reqBtn = document.createElement('div');
-  reqBtn.className = 'mnav-item';
-  reqBtn.onclick = () => showSection('requirements');
-  reqBtn.innerHTML = '📎 Docs';
-  mNav.appendChild(reqBtn);
-}
-
-function showSection(id) {
-  currentSection = id;
-  document.querySelectorAll('.section-panel').forEach(p => p.classList.remove('active'));
-  const panel = document.getElementById('panel-' + id);
-  if (panel) panel.classList.add('active');
-
-  // autofill box only on profile
-  const afBox = document.getElementById('autofillBox');
-  if (afBox) afBox.classList.toggle('hidden', id !== 'profile');
-
-  // Update navs
-  document.querySelectorAll('.nav-section').forEach(n => n.classList.remove('active'));
-  const navEl = document.getElementById('nav-' + id);
-  if (navEl) navEl.classList.add('active');
-  document.querySelectorAll('.mnav-item').forEach(n => n.classList.remove('active'));
-  const mNavEl = document.getElementById('mnav-' + id);
-  if (mNavEl) mNavEl.classList.add('active');
-
-  // Requirements nav btn
-  const reqNavBtn = document.getElementById('reqNavBtn');
-  if (reqNavBtn) reqNavBtn.classList.toggle('active', id === 'requirements');
-
-  // Update completion summary if declaration section
-  if (id === 'declaration') buildCompletionSummary();
-
-  // Scroll to top
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-
-  // Aria speaks section guide
-  if (voiceEnabled && STEP_SCRIPTS[id]) {
-    setTimeout(() => ariaSay(STEP_SCRIPTS[id]), 400);
-  }
-
-  // Update aria quick actions
-  updateAriaContext(id);
 }
 
 /* ═══ SECTION COMPLETION TRACKING ═══ */
@@ -2629,37 +2330,6 @@ function retakePhoto() {
   capturedImageBase64 = null;
 }
 
-async function confirmCapture() {
-  if (!capturedImageBase64) return;
-  closeCamera();
-
-  if (cameraPurpose === 'selfie') {
-    await processSelfieMatch(capturedImageBase64);
-    return;
-  }
-
-  // Convert dataURL to File-like object for processDocUpload
-  const base64 = capturedImageBase64.split(',')[1];
-  const mimeType = 'image/jpeg';
-
-  // Show as uploaded in UI
-  updateDocStatus(cameraDocType, 'amber', '⏳ Processing capture...');
-
-  if (cameraPurpose === 'photo') {
-    // Store for selfie matching
-    kycPhotoBase64 = capturedImageBase64;
-    const thumb = document.getElementById('kycThumb');
-    if (thumb) thumb.src = capturedImageBase64;
-    // Mark as uploaded
-    updateDocStatus('photo', 'amber', '⏳ Checking photo...');
-    processDocBase64(base64, mimeType, 'photo');
-    updateDocTabCount('kyc');
-    return;
-  }
-
-  processDocBase64(base64, mimeType, cameraDocType);
-}
-
 function storeKycPhoto(inputEl) {
   const file = inputEl.files[0];
   if (!file || !file.type.startsWith('image/')) return;
@@ -3053,49 +2723,6 @@ function toggleAriaListen() {
 }
 
 /* ═══ GEMINI CONNECTION STATUS ═══ */
-let geminiConnected = false;
-function setGeminiStatus(state) {
-  const dot = document.getElementById('geminiDot');
-  const txt = document.getElementById('geminiStatusTxt');
-  if (!dot || !txt) return;
-  dot.className = 'gemini-dot';
-  if (state === 'connected') { dot.classList.add('connected'); txt.textContent = 'AI Connected'; geminiConnected = true; }
-  else if (state === 'connecting') { dot.classList.add('connecting'); txt.textContent = 'Connecting…'; }
-  else if (state === 'error') { dot.classList.add('error'); txt.textContent = 'AI Error'; geminiConnected = false; }
-  else { txt.textContent = 'AI Offline'; geminiConnected = false; }
-}
-
-async function testGeminiConnection() {
-  const key = getGeminiKey();
-  if (!key || !geminiModeEnabled) { setGeminiStatus('offline'); updateActiveModelBadge(); return; }
-  setGeminiStatus('connecting');
-  const models = getActiveModelList();
-  for (const modelId of models) {
-    try {
-      const resp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${key}`,
-        {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ contents:[{parts:[{text:'Hi'}]}], generationConfig:{maxOutputTokens:5} })
-        }
-      );
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-          activeGeminiModel = modelId;
-          setGeminiStatus('connected');
-          updateActiveModelBadge();
-          showToast('✅', `AI ready: ${modelId}`);
-          return;
-        }
-      }
-    } catch(e) { /* try next */ }
-  }
-  setGeminiStatus('error');
-  updateActiveModelBadge();
-  showToast('⚠️', 'All selected models failed — check key or select different models');
-}
-
 /* ═══ VOICE LANGUAGE STATE ═══ */
 let voiceLang = 'en'; // 'en' or 'hi'
 function toggleVoiceLang() {
@@ -3438,22 +3065,6 @@ function signatureDemo() {
   }
 }
 
-function submitForm() {
-  const checks = ['dec1','dec2','dec3','dec4','dec5'];
-  if (!checks.every(id => document.getElementById(id)?.checked)) {
-    showToast('⚠️','Please accept all 5 declarations'); return;
-  }
-  const { reference, data } = extractFormData();
-  window._lastProposalData = data;
-  window._lastProposalRef = reference;
-  document.querySelectorAll('.section-panel').forEach(p => p.classList.remove('active'));
-  document.getElementById('panel-success').classList.add('active');
-  document.getElementById('refNumber').textContent = reference;
-  window.scrollTo({ top:0, behavior:'smooth' });
-  showToast('🎉','Proposal submitted successfully!');
-  if (voiceEnabled) setTimeout(() => ariaSay('Congratulations! Your proposal has been successfully submitted to ABC Life Insurance. Your reference number is shown on screen. Please save it. Our team will contact you within 2 to 3 business days. Thank you!'), 400);
-}
-
 /* ═══ JSON EXPORT ═══ */
 function extractFormData() {
   const ts = new Date().toISOString();
@@ -3523,6 +3134,8 @@ function showToast(icon, msg) {
 /* Bootstrap moved to v5.0 block below */
 
 /* ══════════════════════════════════════════════════════════════
+
+
    ABC LIFE v5.0 — CLEAN REWRITE
    • Hardcoded Gemini key (placeholder)
    • 3-step onboarding: Selfie → KYC → Photo Match
@@ -3540,9 +3153,9 @@ const GEMINI_KEY_HARDCODED = 'AIzaSyCeHye-RBwplRemVzEGIOIv70rSWYf5AuE';
 
 /* Available models — Gemini free tier, ordered by preference */
 const GEMINI_MODEL_OPTIONS = [
-  { id: 'gemini-3.1-flash-lite-preview',           label: 'Gemini 3.1 Flash Lite',    tier: 'free'    },
+  { id: 'gemini-2.0-flash-lite',           label: 'Gemini 2.0 Flash Lite',    tier: 'free'    },
   { id: 'gemini-2.5-flash-preview-05-20',  label: 'Gemini 2.5 Flash Preview', tier: 'preview' },
-  { id: 'gemini-2.0-flash-lite',                label: 'Gemini 2.0 Flash',         tier: 'free'    },
+  { id: 'gemini-2.0-flash',                label: 'Gemini 2.0 Flash',         tier: 'free'    },
 ];
 
 let activeGeminiModel = GEMINI_MODEL_OPTIONS[0].id;
@@ -4077,7 +3690,6 @@ function obSkip() {
 }
 
 /* Hook camera confirmation for onboarding */
-const _origConfirmCapture = confirmCapture;
 async function confirmCapture() {
   if (!capturedImageBase64) return;
   closeCamera();
@@ -4115,14 +3727,6 @@ async function confirmCapture() {
 }
 
 /* When step 2→3, run the match */
-const _origObGoStep = obGoStep;
-function obGoStep(n) {
-  _origObGoStep(n);
-  if (n === 3) {
-    // slight delay to let DOM render
-    setTimeout(obRunMatch, 200);
-  }
-}
 
 /* ─── STARTPORTAL — show onboarding ────────────────────────── */
 function startPortal(withVoice) {
