@@ -1781,8 +1781,6 @@ const ALL_GEMINI_MODELS = [
 ];
 
 // Runtime state
-let activeGeminiModel = 'gemini-2.0-flash-lite';
-let geminiModeEnabled = true; // false when user skips Gemini
 
 function getGeminiKey() { return sessionStorage.getItem('abc_life_gemini_key') || ''; }
 function getCheckedModels() {
@@ -3538,13 +3536,13 @@ function showToast(icon, msg) {
    Free-tier key from https://aistudio.google.com/app/apikey
    This is a demo — key is embedded for convenience only.
 ─────────────────────────────────────────────────────────────── */
-const GEMINI_KEY_HARDCODED = 'PASTE_YOUR_GEMINI_API_KEY_HERE';
+const GEMINI_KEY_HARDCODED = 'AIzaSyCeHye-RBwplRemVzEGIOIv70rSWYf5AuE';
 
 /* Available models — Gemini free tier, ordered by preference */
 const GEMINI_MODEL_OPTIONS = [
-  { id: 'gemini-2.0-flash-lite',           label: 'Gemini 2.0 Flash Lite',    tier: 'free'    },
+  { id: 'gemini-3.1-flash-lite-preview',           label: 'Gemini 3.1 Flash Lite',    tier: 'free'    },
   { id: 'gemini-2.5-flash-preview-05-20',  label: 'Gemini 2.5 Flash Preview', tier: 'preview' },
-  { id: 'gemini-2.0-flash',                label: 'Gemini 2.0 Flash',         tier: 'free'    },
+  { id: 'gemini-2.0-flash-lite',                label: 'Gemini 2.0 Flash',         tier: 'free'    },
 ];
 
 let activeGeminiModel = GEMINI_MODEL_OPTIONS[0].id;
